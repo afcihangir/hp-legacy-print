@@ -41,6 +41,68 @@ static void set_media(pappl_media_col_t *media,
     media->top_margin = bottom_top;
 }
 
+
+static bool disabled_rstartjob(pappl_job_t *job,
+                               pappl_pr_options_t *options,
+                               pappl_device_t *device)
+{
+    (void)options;
+    (void)device;
+
+    papplLogJob(job,
+                PAPPL_LOGLEVEL_ERROR,
+                "P1102 raster backend is not connected yet; job stopped safely.");
+    return false;
+}
+
+static bool disabled_rstartpage(pappl_job_t *job,
+                                pappl_pr_options_t *options,
+                                pappl_device_t *device,
+                                unsigned page)
+{
+    (void)job;
+    (void)options;
+    (void)device;
+    (void)page;
+    return false;
+}
+
+static bool disabled_rwriteline(pappl_job_t *job,
+                                pappl_pr_options_t *options,
+                                pappl_device_t *device,
+                                unsigned y,
+                                const unsigned char *line)
+{
+    (void)job;
+    (void)options;
+    (void)device;
+    (void)y;
+    (void)line;
+    return false;
+}
+
+static bool disabled_rendpage(pappl_job_t *job,
+                              pappl_pr_options_t *options,
+                              pappl_device_t *device,
+                              unsigned page)
+{
+    (void)job;
+    (void)options;
+    (void)device;
+    (void)page;
+    return true;
+}
+
+static bool disabled_rendjob(pappl_job_t *job,
+                             pappl_pr_options_t *options,
+                             pappl_device_t *device)
+{
+    (void)job;
+    (void)options;
+    (void)device;
+    return true;
+}
+
 static bool driver_cb(pappl_system_t *system,
                       const char *driver_name,
                       const char *device_uri,
@@ -63,7 +125,7 @@ static bool driver_cb(pappl_system_t *system,
         return false;
     }
 
-    memset(driver_data, 0, sizeof(*driver_data));
+    /* PAPPL pre-initializes driver_data with valid defaults. Preserve them. */
     *driver_attrs = NULL;
 
     snprintf(driver_data->make_and_model,
@@ -78,6 +140,17 @@ static bool driver_cb(pappl_system_t *system,
     driver_data->format = "image/pwg-raster";
     driver_data->kind = PAPPL_KIND_DOCUMENT;
     driver_data->ppm = 18;
+
+    /*
+     * PAPPL requires the complete raster callback set before it accepts
+     * capability data. These safe stubs deliberately reject a print job at
+     * rstartjob until the real P1102 renderer/transport is wired in.
+     */
+    driver_data->rstartjob_cb = disabled_rstartjob;
+    driver_data->rstartpage_cb = disabled_rstartpage;
+    driver_data->rwriteline_cb = disabled_rwriteline;
+    driver_data->rendpage_cb = disabled_rendpage;
+    driver_data->rendjob_cb = disabled_rendjob;
 
     driver_data->color_supported = PAPPL_COLOR_MODE_MONOCHROME;
     driver_data->color_default = PAPPL_COLOR_MODE_MONOCHROME;
