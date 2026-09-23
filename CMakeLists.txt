@@ -15,6 +15,7 @@ add_library(hplp_core
     src/usb_power.c
     src/usb_claim.c
     src/usb_transport.c
+    src/render_test.c
 )
 
 target_include_directories(hplp_core PUBLIC include)
