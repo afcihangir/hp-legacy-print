@@ -1,0 +1,157 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include "hplp/render_test.h"
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static const char TEST_PS[] =
+    "%!PS-Adobe-3.0\n"
+    "%%Pages: 1\n"
+    "%%BoundingBox: 0 0 595 842\n"
+    "%%EndComments\n"
+    "/Helvetica-Bold findfont 24 scalefont setfont\n"
+    "72 760 moveto\n"
+    "(HP Legacy Print - P1102 Test) show\n"
+    "/Helvetica findfont 14 scalefont setfont\n"
+    "72 720 moveto\n"
+    "(A4 - ZJS/Z2 render pipeline OK) show\n"
+    "72 690 moveto\n"
+    "(No USB data was sent by this test.) show\n"
+    "showpage\n"
+    "%%EOF\n";
+
+static int write_all(int fd, const char *data, size_t length)
+{
+    size_t offset = 0;
+
+    while (offset < length) {
+        ssize_t written = write(fd, data + offset, length - offset);
+
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+
+        offset += (size_t)written;
+    }
+
+    return 0;
+}
+
+int hplp_render_p1102_test(void)
+{
+    char ps_path[] = "/tmp/hplp-p1102-test-XXXXXX";
+    char zjs_path[] = "/tmp/hplp-p1102-zjs-XXXXXX";
+
+    int ps_fd = mkstemp(ps_path);
+    if (ps_fd < 0) {
+        perror("mkstemp PostScript");
+        return 1;
+    }
+
+    if (write_all(ps_fd, TEST_PS, sizeof(TEST_PS) - 1) != 0) {
+        perror("write PostScript");
+        close(ps_fd);
+        unlink(ps_path);
+        return 1;
+    }
+
+    if (close(ps_fd) != 0) {
+        perror("close PostScript");
+        unlink(ps_path);
+        return 1;
+    }
+
+    int zjs_fd = mkstemp(zjs_path);
+    if (zjs_fd < 0) {
+        perror("mkstemp ZJS");
+        unlink(ps_path);
+        return 1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        close(zjs_fd);
+        unlink(ps_path);
+        unlink(zjs_path);
+        return 1;
+    }
+
+    if (pid == 0) {
+        if (dup2(zjs_fd, STDOUT_FILENO) < 0) {
+            _exit(126);
+        }
+
+        close(zjs_fd);
+
+        execl("/usr/bin/foo2zjs-wrapper",
+              "foo2zjs-wrapper",
+              "-z2",
+              "-P",
+              "-L0",
+              "-p9",
+              "-s7",
+              "-m1",
+              "-n1",
+              ps_path,
+              (char *)NULL);
+
+        _exit(127);
+    }
+
+    close(zjs_fd);
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        unlink(ps_path);
+        unlink(zjs_path);
+        return 1;
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr,
+                "Render failed: foo2zjs-wrapper exit=%d\n",
+                WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        unlink(ps_path);
+        unlink(zjs_path);
+        return 1;
+    }
+
+    struct stat info;
+    if (stat(zjs_path, &info) != 0) {
+        perror("stat ZJS");
+        unlink(ps_path);
+        unlink(zjs_path);
+        return 1;
+    }
+
+    if (info.st_size <= 0) {
+        fputs("Render failed: generated ZJS file is empty.\n", stderr);
+        unlink(ps_path);
+        unlink(zjs_path);
+        return 1;
+    }
+
+    printf("RENDER OK\n");
+    printf("  model=HP LaserJet Pro P1102\n");
+    printf("  paper=A4\n");
+    printf("  encoder=foo2zjs-wrapper -z2 -P -L0\n");
+    printf("  bytes=%lld\n", (long long)info.st_size);
+    printf("  usb-data-sent=no\n");
+
+    unlink(ps_path);
+    unlink(zjs_path);
+    return 0;
+}
