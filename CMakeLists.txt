@@ -34,6 +34,9 @@ add_executable(test-models tests/test_models.c)
 target_link_libraries(test-models PRIVATE hplp_core)
 add_test(NAME model_table COMMAND test-models)
 
-add_executable(hp-legacy-print-app src/pappl_app.c)
-target_link_libraries(hp-legacy-print-app PRIVATE PkgConfig::PAPPL)
+add_executable(hp-legacy-print-app
+    src/pappl_app.c
+    src/pappl_device.c
+)
+target_link_libraries(hp-legacy-print-app PRIVATE hplp_core PkgConfig::PAPPL)
 target_compile_options(hp-legacy-print-app PRIVATE -Wall -Wextra -Wpedantic)
