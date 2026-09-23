@@ -5,6 +5,7 @@
 #include "hplp/usb_power.h"
 #include "hplp/usb_claim.h"
 #include "hplp/usb_transport.h"
+#include "hplp/render_test.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -157,7 +158,7 @@ static int watch_devices(void)
 
 static void usage(const char *program)
 {
-    fprintf(stderr, "Usage: %s --list | --watch | --inspect | --power-info | --claim-check | --transport-watch\n", program);
+    fprintf(stderr, "Usage: %s --list | --watch | --inspect | --power-info | --claim-check | --transport-watch | --render-test\n", program);
 }
 
 int main(int argc, char **argv)
@@ -189,6 +190,10 @@ int main(int argc, char **argv)
 
     if (strcmp(argv[1], "--transport-watch") == 0) {
         return hplp_usb_transport_watch();
+    }
+
+    if (strcmp(argv[1], "--render-test") == 0) {
+        return hplp_render_p1102_test();
     }
 
     usage(argv[0]);
