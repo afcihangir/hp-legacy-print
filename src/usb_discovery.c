@@ -4,25 +4,38 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void read_serial(libusb_device *device,
-                        const struct libusb_device_descriptor *descriptor,
-                        char *buffer,
-                        size_t buffer_size)
+static hplp_serial_state_t read_serial(
+    libusb_device *device,
+    const struct libusb_device_descriptor *descriptor,
+    char *buffer,
+    size_t buffer_size,
+    int *error_code)
 {
     libusb_device_handle *handle = NULL;
 
+    if (error_code != NULL) {
+        *error_code = 0;
+    }
+
     if (buffer_size == 0) {
-        return;
+        if (error_code != NULL) {
+            *error_code = LIBUSB_ERROR_INVALID_PARAM;
+        }
+        return HPLP_SERIAL_PENDING;
     }
 
     buffer[0] = '\0';
 
     if (descriptor->iSerialNumber == 0) {
-        return;
+        return HPLP_SERIAL_ABSENT;
     }
 
-    if (libusb_open(device, &handle) != 0) {
-        return;
+    int rc = libusb_open(device, &handle);
+    if (rc != 0) {
+        if (error_code != NULL) {
+            *error_code = rc;
+        }
+        return HPLP_SERIAL_PENDING;
     }
 
     int length = libusb_get_string_descriptor_ascii(
@@ -34,11 +47,17 @@ static void read_serial(libusb_device *device,
 
     if (length > 0) {
         buffer[length] = '\0';
-    } else {
-        buffer[0] = '\0';
+        libusb_close(handle);
+        return HPLP_SERIAL_READY;
+    }
+
+    buffer[0] = '\0';
+    if (error_code != NULL) {
+        *error_code = length < 0 ? length : LIBUSB_ERROR_IO;
     }
 
     libusb_close(handle);
+    return HPLP_SERIAL_PENDING;
 }
 
 int hplp_usb_list(hplp_usb_device_t **devices, size_t *count)
@@ -109,8 +128,13 @@ int hplp_usb_list(hplp_usb_device_t **devices, size_t *count)
         result[out].product_id = descriptor.idProduct;
         result[out].model = model;
 
-        read_serial(list[i], &descriptor,
-                    result[out].serial, sizeof(result[out].serial));
+        result[out].serial_state = read_serial(
+            list[i],
+            &descriptor,
+            result[out].serial,
+            sizeof(result[out].serial),
+            &result[out].serial_error
+        );
 
         ++out;
     }
