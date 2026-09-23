@@ -7,6 +7,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
+pkg_check_modules(PAPPL REQUIRED IMPORTED_TARGET pappl)
 
 add_library(hplp_core
     src/models.c
@@ -32,3 +33,7 @@ enable_testing()
 add_executable(test-models tests/test_models.c)
 target_link_libraries(test-models PRIVATE hplp_core)
 add_test(NAME model_table COMMAND test-models)
+
+add_executable(hp-legacy-print-app src/pappl_app.c)
+target_link_libraries(hp-legacy-print-app PRIVATE PkgConfig::PAPPL)
+target_compile_options(hp-legacy-print-app PRIVATE -Wall -Wextra -Wpedantic)
