@@ -10,10 +10,38 @@
 
 static volatile sig_atomic_t keep_running = 1;
 
+typedef enum {
+    WATCH_DISCONNECTED = 0,
+    WATCH_CONNECTING = 1,
+    WATCH_READY = 2
+} watch_state_t;
+
 static void on_signal(int signal_number)
 {
     (void)signal_number;
     keep_running = 0;
+}
+
+static void print_device(const hplp_usb_device_t *d)
+{
+    printf("%s | %04x:%04x | bus=%u address=%u | protocol=%s",
+           d->model->model,
+           d->vendor_id,
+           d->product_id,
+           d->bus_number,
+           d->device_address,
+           hplp_protocol_name(d->model->protocol));
+
+    if (d->serial_state == HPLP_SERIAL_READY) {
+        printf(" | serial=%s", d->serial);
+    } else if (d->serial_state == HPLP_SERIAL_PENDING) {
+        printf(" | serial=pending(error=%d)", d->serial_error);
+    } else {
+        printf(" | serial=not-present");
+    }
+
+    printf(" | firmware=%s\n",
+           d->model->firmware_required ? "required" : "not-required");
 }
 
 static int print_devices(void)
@@ -34,22 +62,7 @@ static int print_devices(void)
     }
 
     for (size_t i = 0; i < count; ++i) {
-        const hplp_usb_device_t *d = &devices[i];
-
-        printf("%s | %04x:%04x | bus=%u address=%u | protocol=%s",
-               d->model->model,
-               d->vendor_id,
-               d->product_id,
-               d->bus_number,
-               d->device_address,
-               hplp_protocol_name(d->model->protocol));
-
-        if (d->serial[0] != '\0') {
-            printf(" | serial=%s", d->serial);
-        }
-
-        printf(" | firmware=%s\n",
-               d->model->firmware_required ? "required" : "not-required");
+        print_device(&devices[i]);
     }
 
     hplp_usb_list_free(devices);
@@ -62,9 +75,51 @@ static void sleep_one_second(void)
     nanosleep(&duration, NULL);
 }
 
+static watch_state_t state_for_devices(
+    const hplp_usb_device_t *devices,
+    size_t count)
+{
+    if (count == 0) {
+        return WATCH_DISCONNECTED;
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        if (devices[i].serial_state == HPLP_SERIAL_PENDING) {
+            return WATCH_CONNECTING;
+        }
+    }
+
+    return WATCH_READY;
+}
+
+static void print_watch_devices(
+    watch_state_t state,
+    const hplp_usb_device_t *devices,
+    size_t count)
+{
+    switch (state) {
+    case WATCH_DISCONNECTED:
+        puts("STATE DISCONNECTED");
+        break;
+    case WATCH_CONNECTING:
+        puts("STATE CONNECTING");
+        break;
+    case WATCH_READY:
+        puts("STATE READY");
+        break;
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        printf("  ");
+        print_device(&devices[i]);
+    }
+
+    fflush(stdout);
+}
+
 static int watch_devices(void)
 {
-    int last_present = -1;
+    int last_state = -1;
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
@@ -82,27 +137,11 @@ static int watch_devices(void)
             continue;
         }
 
-        int present = count > 0;
+        watch_state_t state = state_for_devices(devices, count);
 
-        if (present != last_present) {
-            if (present) {
-                puts("STATE READY");
-                for (size_t i = 0; i < count; ++i) {
-                    printf("  %s %04x:%04x",
-                           devices[i].model->model,
-                           devices[i].vendor_id,
-                           devices[i].product_id);
-                    if (devices[i].serial[0] != '\0') {
-                        printf(" serial=%s", devices[i].serial);
-                    }
-                    putchar('\n');
-                }
-            } else {
-                puts("STATE DISCONNECTED");
-            }
-
-            fflush(stdout);
-            last_present = present;
+        if ((int)state != last_state) {
+            print_watch_devices(state, devices, count);
+            last_state = (int)state;
         }
 
         hplp_usb_list_free(devices);
