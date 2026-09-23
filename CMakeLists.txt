@@ -13,6 +13,7 @@ add_library(hplp_core
     src/usb_discovery.c
     src/usb_inspect.c
     src/usb_power.c
+    src/usb_claim.c
 )
 
 target_include_directories(hplp_core PUBLIC include)
