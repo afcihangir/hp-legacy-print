@@ -52,3 +52,18 @@ Provide a stable modern Linux printing path for older host-based HP LaserJet pri
 ## Safety rule for early milestones
 
 Until M1 is intentionally enabled, the project must not detach kernel drivers, claim printer interfaces, change power management, or send bytes to a printer. This keeps development from disrupting an existing CUPS setup.
+
+
+## Verified P1102 USB profile
+
+Observed on HP LaserJet Pro P1102 (03f0:002a):
+
+- Printer interface: 0
+- USB class/subclass/protocol: 7/1/2
+- Bulk OUT endpoint: 0x01
+- Bulk IN endpoint: 0x81
+- Kernel usblp driver: active on interface 0
+- Vendor-specific interface 1 is present but is not used by the transport until its purpose is verified.
+- The model carries a no-reattach transport quirk. The future daemon must keep ownership and must not blindly reattach usblp after each job.
+
+The transport profile is stored in the model table so endpoint choices are data-driven rather than hard-coded throughout the code.
