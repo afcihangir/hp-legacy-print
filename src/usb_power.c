@@ -144,6 +144,25 @@ int hplp_usb_power_info_supported(void)
         print_value(sysfs_name, "power/autosuspend_delay_ms",
                     "power.autosuspend_delay_ms");
         print_value(sysfs_name, "power/wakeup", "power.wakeup");
+
+        {
+            char path[512];
+            char value[64];
+
+            snprintf(path, sizeof(path),
+                     "/sys/bus/usb/devices/%s/power/control",
+                     sysfs_name);
+
+            if (read_text_file(path, value, sizeof(value)) == 0) {
+                if (strcmp(value, "on") == 0) {
+                    puts("  interpretation=host-autosuspend-disabled");
+                } else if (strcmp(value, "auto") == 0) {
+                    puts("  interpretation=host-autosuspend-allowed");
+                } else {
+                    puts("  interpretation=host-power-policy-unknown");
+                }
+            }
+        }
     }
 
     libusb_free_device_list(list, 1);
