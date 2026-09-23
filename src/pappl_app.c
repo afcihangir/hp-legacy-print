@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <pappl/pappl.h>
+#include "hplp/pappl_device.h"
 
 #include <stdbool.h>
 #include <fcntl.h>
@@ -497,6 +498,8 @@ static bool driver_cb(pappl_system_t *system,
 
 int main(int argc, char *argv[])
 {
+    hplp_pappl_register_device_scheme();
+
     return papplMainloop(
         argc,
         argv,
