@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "hplp/usb_discovery.h"
+#include "hplp/usb_inspect.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -153,7 +154,7 @@ static int watch_devices(void)
 
 static void usage(const char *program)
 {
-    fprintf(stderr, "Usage: %s --list | --watch\n", program);
+    fprintf(stderr, "Usage: %s --list | --watch | --inspect\n", program);
 }
 
 int main(int argc, char **argv)
@@ -169,6 +170,10 @@ int main(int argc, char **argv)
 
     if (strcmp(argv[1], "--watch") == 0) {
         return watch_devices();
+    }
+
+    if (strcmp(argv[1], "--inspect") == 0) {
+        return hplp_usb_inspect_supported();
     }
 
     usage(argv[0]);
