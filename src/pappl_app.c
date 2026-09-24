@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#define HPLP_APP_VERSION "0.2.0"
+#define HPLP_APP_VERSION "0.2.1"
 
 static pappl_pr_driver_t drivers[] = {
     {
@@ -179,6 +179,15 @@ static bool raster_rstartpage(pappl_job_t *job,
         job_data->yres = options->printer_resolution[1];
         job_data->paper_code = paper_code;
         job_data->copies = options->copies > 0 ? options->copies : 1;
+
+        papplLogJob(job, PAPPL_LOGLEVEL_INFO,
+                    "Render target: media=%s geometry=%dx%d resolution=%dx%d copies=%d.",
+                    options->media.size_name,
+                    job_data->width,
+                    job_data->height,
+                    job_data->xres,
+                    job_data->yres,
+                    job_data->copies);
     } else if (job_data->width != (int)options->header.cupsWidth ||
                job_data->height != (int)options->header.cupsHeight ||
                job_data->xres != options->printer_resolution[0] ||
@@ -275,13 +284,18 @@ static bool encode_pbm_to_zjs(pappl_job_t *job, p1102_job_data_t *job_data)
     int status;
     struct stat st;
 
-    if (fflush(job_data->pbm) != 0 || fclose(job_data->pbm) != 0) {
+    {
+        int flush_failed = fflush(job_data->pbm) != 0;
+        int close_failed = fclose(job_data->pbm) != 0;
+
         job_data->pbm = NULL;
-        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                    "Unable to finish temporary PBM file.");
-        return false;
+
+        if (flush_failed || close_failed) {
+            papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
+                        "Unable to finish temporary PBM file.");
+            return false;
+        }
     }
-    job_data->pbm = NULL;
 
     snprintf(job_data->zjs_path, sizeof(job_data->zjs_path),
              "/tmp/hplp-p1102-zjs-XXXXXX");
@@ -447,6 +461,11 @@ static bool driver_cb(pappl_system_t *system,
     driver_data->orient_default = IPP_ORIENT_NONE;
     driver_data->scaling_default = PAPPL_SCALING_AUTO;
 
+    /*
+     * PAPPL's BLACK_1 path uses set bits for black pixels. PBM P4 uses the
+     * same 1=black convention, so raster lines can be written without bit
+     * inversion before foo2zjs.
+     */
     driver_data->raster_types =
         PAPPL_PWG_RASTER_TYPE_BLACK_1 |
         PAPPL_PWG_RASTER_TYPE_BLACK_8 |
