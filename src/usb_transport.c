@@ -12,6 +12,7 @@
 
 #define HPLP_USB_TIMEOUT_MS 10000
 #define HPLP_USB_CHUNK_SIZE 16384
+#define HPLP_USB_RECONNECT_ATTEMPTS 10
 
 static volatile sig_atomic_t transport_running = 1;
 
@@ -248,6 +249,87 @@ static int claim_device(libusb_device *device,
     return 0;
 }
 
+static int reopen_exact_device(hplp_usb_session_t *session)
+{
+    libusb_device **list = NULL;
+    ssize_t total;
+    char expected_serial[sizeof(session->serial)];
+    int result = LIBUSB_ERROR_NO_DEVICE;
+
+    if (!session ||
+        !session->context ||
+        !session->model ||
+        !session->serial[0]) {
+        return LIBUSB_ERROR_INVALID_PARAM;
+    }
+
+    snprintf(expected_serial, sizeof(expected_serial), "%s", session->serial);
+
+    /*
+     * A stale handle cannot become useful again after LIBUSB_ERROR_NO_DEVICE.
+     * Do not reattach the kernel driver while recovering from a disconnect.
+     */
+    close_session_handle(session, 0);
+
+    total = libusb_get_device_list(session->context, &list);
+    if (total < 0) {
+        return (int)total;
+    }
+
+    for (ssize_t i = 0; i < total; ++i) {
+        struct libusb_device_descriptor descriptor;
+        int rc;
+
+        if (libusb_get_device_descriptor(list[i], &descriptor) != 0) {
+            continue;
+        }
+
+        if (descriptor.idVendor != session->vendor_id ||
+            descriptor.idProduct != session->product_id) {
+            continue;
+        }
+
+        rc = claim_device(list[i],
+                          &descriptor,
+                          session->model,
+                          expected_serial,
+                          session);
+        if (rc == 0) {
+            result = 0;
+            break;
+        }
+
+        if (rc != LIBUSB_ERROR_NO_DEVICE) {
+            result = rc;
+        }
+    }
+
+    libusb_free_device_list(list, 1);
+    return result;
+}
+
+static int reconnect_before_first_byte(hplp_usb_session_t *session)
+{
+    int rc = LIBUSB_ERROR_NO_DEVICE;
+
+    if (!session || session->bytes_accepted != 0) {
+        return LIBUSB_ERROR_OTHER;
+    }
+
+    for (int attempt = 0; attempt < HPLP_USB_RECONNECT_ATTEMPTS; ++attempt) {
+        rc = reopen_exact_device(session);
+        if (rc == 0) {
+            return 0;
+        }
+
+        if (attempt + 1 < HPLP_USB_RECONNECT_ATTEMPTS) {
+            sleep_one_second();
+        }
+    }
+
+    return rc;
+}
+
 static int open_first_supported(libusb_context *context,
                                 hplp_usb_session_t *session)
 {
@@ -381,11 +463,26 @@ ssize_t hplp_usb_session_write(hplp_usb_session_t *session,
     const unsigned char *data = (const unsigned char *)buffer;
     size_t offset = 0;
 
-    if (!session || !session->handle || (!buffer && bytes > 0)) {
+    if (!session || (!buffer && bytes > 0)) {
         if (session) {
             session->last_error = LIBUSB_ERROR_INVALID_PARAM;
         }
         return -1;
+    }
+
+    if (bytes == 0) {
+        return 0;
+    }
+
+    if (!session->handle) {
+        session->last_error = LIBUSB_ERROR_NO_DEVICE;
+
+        if (session->bytes_accepted == 0 &&
+            reconnect_before_first_byte(session) == 0) {
+            session->last_error = 0;
+        } else {
+            return -1;
+        }
     }
 
     session->last_error = 0;
@@ -410,15 +507,33 @@ ssize_t hplp_usb_session_write(hplp_usb_session_t *session,
             session->bytes_accepted += (size_t)transferred;
         }
 
-        if (rc != 0) {
-            session->last_error = rc;
-            return -1;
+        if (rc == 0 && transferred > 0) {
+            continue;
         }
 
-        if (transferred == 0) {
-            session->last_error = LIBUSB_ERROR_IO;
-            return -1;
+        if (rc == 0) {
+            rc = LIBUSB_ERROR_IO;
         }
+
+        /*
+         * Reconnect/replay is safe only before the printer has accepted any
+         * byte from this job/session. Once any byte is accepted we fail hard:
+         * blindly replaying a ZJS stream can duplicate or corrupt pages.
+         */
+        if (rc == LIBUSB_ERROR_NO_DEVICE &&
+            session->bytes_accepted == 0 &&
+            offset == 0) {
+            int reconnect_rc = reconnect_before_first_byte(session);
+
+            if (reconnect_rc == 0) {
+                continue;
+            }
+
+            rc = reconnect_rc;
+        }
+
+        session->last_error = rc;
+        return -1;
     }
 
     return (ssize_t)offset;
